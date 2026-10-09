@@ -1,8 +1,10 @@
 name: Update mapping
 
-# Manual only for now. A weekly schedule (e.g. cron: "0 4 * * 1") is to be
-# enabled once the first full run has been reviewed.
+# Weekly (Monday 04:00 UTC) and on demand. The first full run was reviewed
+# and published on 2026-10-09.
 on:
+  schedule:
+    - cron: "0 4 * * 1"
   workflow_dispatch:
     inputs:
       refresh:

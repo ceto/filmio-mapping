@@ -42,6 +42,6 @@ python3 generate.py                 # full catalogue
 python3 -m unittest discover -s tests -t .
 ```
 
-The GitHub Actions workflow (`.github/workflows/update.yml`) runs the same steps and commits the mapping when it changes. It is started manually for now. The TMDB credential is a repository secret (`TMDB_READ_TOKEN`) and never part of the repository.
+The GitHub Actions workflow (`.github/workflows/update.yml`) runs the same steps and commits the mapping when it changes. It runs weekly (Monday 04:00 UTC) and can be started manually. The TMDB credential is a repository secret (`TMDB_READ_TOKEN`) and never part of the repository.
 
 Standard library only, Python 3.8+.

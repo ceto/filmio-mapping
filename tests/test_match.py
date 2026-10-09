@@ -18,6 +18,11 @@ class FakeTmdb(object):
     def details(self, kind, tmdb_id):
         return self.details_by_id.get(tmdb_id, {})
 
+    def details_or_none(self, kind, tmdb_id):
+        if tmdb_id in getattr(self, "gone", ()):
+            return None
+        return self.details_by_id.get(tmdb_id, {})
+
 
 def movie(tmdb_id, title, year, original=None):
     return {"id": tmdb_id, "title": title, "original_title": original or title,

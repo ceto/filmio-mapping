@@ -75,6 +75,10 @@ class Tmdb(object):
                             include_adult="false")
         return (data or {}).get("results") or []
 
-    def details(self, kind, tmdb_id):
+    def details_or_none(self, kind, tmdb_id):
+        """Details with external ids; None if TMDB no longer has the title."""
         path = "/movie/%d" % tmdb_id if kind == "movie" else "/tv/%d" % tmdb_id
-        return self.get(path, append_to_response="external_ids", language="hu-HU") or {}
+        return self.get(path, append_to_response="external_ids", language="hu-HU")
+
+    def details(self, kind, tmdb_id):
+        return self.details_or_none(kind, tmdb_id) or {}

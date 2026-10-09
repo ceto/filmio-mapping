@@ -11,6 +11,9 @@ Rules:
 - Only unambiguous matches are added (filmio_mapping/match.py).
 - Titles that left the catalogue are dropped, unless the catalogue looks
   incomplete (fewer than 90% of the previously mapped titles still present).
+- Every run re-reads the IMDb id of every mapped title (TMDB data must not be
+  kept longer than 6 months) and drops titles TMDB no longer has (overrides
+  excepted).
 """
 import argparse
 import datetime
@@ -69,7 +72,27 @@ def build(titles, previous, overrides, tmdb, refresh=False, log=print):
             report[result.status].append((title, result))
         if i % 50 == 0:
             log("%d/%d titles, %d TMDB requests" % (i, len(titles), tmdb.requests))
+    refresh_details(items, overrides, tmdb, report, log)
     return items, report
+
+
+def refresh_details(items, overrides, tmdb, report, log=print):
+    """Re-read the IMDb id of every mapped title from TMDB."""
+    report.setdefault("removed", [])
+    for n, filmio_id in enumerate(sorted(items), 1):
+        item = items[filmio_id]
+        override = overrides.get(filmio_id)
+        info = tmdb.details_or_none(item["type"], item["tmdb"])
+        if info is None:
+            if override:
+                continue  # trust the manual entry
+            report["removed"].append((filmio_id, item["tmdb"]))
+            del items[filmio_id]
+            continue
+        imdb = (info.get("external_ids") or {}).get("imdb_id") or (override or {}).get("imdb") or item.get("imdb")
+        items[filmio_id] = output.entry(item["type"], item["tmdb"], imdb)
+        if n % 100 == 0:
+            log("refreshed %d/%d, %d TMDB requests" % (n, len(items), tmdb.requests))
 
 
 def write_report(path, titles, report, items):
@@ -81,8 +104,8 @@ def write_report(path, titles, report, items):
            "| catalogue titles | %d |" % len(titles),
            "| mapped (total) | %d |" % len(items),
            "| of which new with a different year | %d |" % sum(1 for _, r in report["matched"] if r.year_relaxed)]
-    for key in ("matched", "kept", "override", "excluded", "ambiguous", "not_found", "disagreements"):
-        out.append("| %s | %d |" % (key, len(report[key])))
+    for key in ("matched", "kept", "override", "excluded", "ambiguous", "not_found", "disagreements", "removed"):
+        out.append("| %s | %d |" % (key, len(report.get(key, []))))
     relaxed = [(t, r) for t, r in report["matched"] if r.year_relaxed]
     out += ["", "## New matches with a different year (please check these)", ""]
     out += ["- %s -> tmdb %s%s: %s" % (line(t), r.tmdb_id, " / " + r.imdb if r.imdb else "", r.reason)
@@ -94,6 +117,8 @@ def write_report(path, titles, report, items):
     out += ["- %s: %s; %s" % (line(t), r.reason, "; ".join(r.candidates)) for t, r in report["ambiguous"]]
     out += ["", "## Disagreements with the existing mapping", ""]
     out += ["- %s: mapped %s, search now says %s" % (line(t), old, new) for t, old, new in report["disagreements"]]
+    out += ["", "## Removed (TMDB no longer has them)", ""]
+    out += ["- %s: tmdb %s" % (fid, tid) for fid, tid in report.get("removed", [])]
     out += ["", "## Not found", ""]
     out += ["- %s: %s" % (line(t), r.reason) for t, r in report["not_found"]]
     with open(path, "w", encoding="utf-8") as fh:

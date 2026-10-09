@@ -30,6 +30,20 @@ class OutputTest(unittest.TestCase):
         self.assertEqual(output.entry("movie", "5", "bogus"), {"type": "movie", "tmdb": 5})
 
 
+class RefreshTest(unittest.TestCase):
+    def test_refresh_updates_imdb_and_drops_gone_titles(self):
+        tmdb = FakeTmdb({}, {1: {"external_ids": {"imdb_id": "tt0000011"}}, 2: {}})
+        tmdb.gone = {3, 4}
+        items = {"a": output.entry("movie", 1), "b": output.entry("movie", 2, "tt0000002"),
+                 "c": output.entry("tvshow", 3), "d": output.entry("movie", 4)}
+        report = {}
+        generate.refresh_details(items, {"d": output.entry("movie", 4)}, tmdb, report, log=lambda m: None)
+        self.assertEqual(items, {"a": {"type": "movie", "tmdb": 1, "imdb": "tt0000011"},
+                                 "b": {"type": "movie", "tmdb": 2, "imdb": "tt0000002"},
+                                 "d": {"type": "movie", "tmdb": 4}})
+        self.assertEqual(report["removed"], [("c", 3)])
+
+
 class BuildTest(unittest.TestCase):
     def setUp(self):
         self.titles = [Title("new", "movie", "Aglaja", None, 2012, None),
@@ -66,6 +80,12 @@ class BuildTest(unittest.TestCase):
                            "b": {"tmdb": None}, "c": None}, fh)
             self.assertEqual(generate.load_overrides(path),
                              {"a": {"type": "movie", "tmdb": 3, "imdb": "tt0000003"}, "b": None, "c": None})
+
+    def test_kept_entries_get_refreshed_details(self):
+        previous = {"old": output.entry("movie", 42)}
+        self.tmdb.details_by_id[42] = {"external_ids": {"imdb_id": "tt0000042"}}
+        items, _ = generate.build(self.titles, previous, {}, self.tmdb, log=lambda m: None)
+        self.assertEqual(items["old"], {"type": "movie", "tmdb": 42, "imdb": "tt0000042"})
 
 
 class CatalogueTest(unittest.TestCase):

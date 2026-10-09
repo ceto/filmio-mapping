@@ -22,7 +22,8 @@ Not affiliated with or endorsed by Filmio, Nemzeti Filmintézet, TMDB or IMDb.
 ```
 
 - `<filmio id>` is the id of a film or series in Filmio's public catalogue.
-- The file contains ids only; no TMDB metadata is copied.
+- The file contains ids only; no TMDB metadata or images are copied.
+- Every run re-reads the TMDB data of all mapped titles, so nothing in the file is older than one run (TMDB terms: no caching beyond 6 months). Titles TMDB no longer has are dropped.
 - Only unambiguous matches are included. A missing title is preferred over a wrong one.
 
 ## How it is built

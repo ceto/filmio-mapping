@@ -32,7 +32,7 @@ jobs:
         run: python -m unittest discover -s tests -t .
       - name: Generate
         env:
-          TMDB_READ_TOKEN: ${{ secrets.TMDB_READ_TOKEN }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: python generate.py ${{ inputs.refresh && '--refresh' || '' }}
       - name: Report
         if: always()

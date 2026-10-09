@@ -37,12 +37,12 @@ Not affiliated with or endorsed by Filmio, Nemzeti Filmintézet, TMDB or IMDb.
 `overrides.json` holds manual corrections and always wins. An existing entry is never replaced automatically.
 
 ```sh
-export TMDB_READ_TOKEN=...          # TMDB API read access token (or TMDB_API_KEY)
+export TMDB_API_KEY=...             # TMDB v3 API key (or TMDB_READ_TOKEN)
 python3 generate.py --limit 50      # try a few titles
 python3 generate.py                 # full catalogue
 python3 -m unittest discover -s tests -t .
 ```
 
-The GitHub Actions workflow (`.github/workflows/update.yml`) runs the same steps and commits the mapping when it changes. It runs weekly (Monday 04:00 UTC) and can be started manually. The TMDB credential is a repository secret (`TMDB_READ_TOKEN`) and never part of the repository.
+The GitHub Actions workflow (`.github/workflows/update.yml`) runs the same steps and commits the mapping when it changes. It runs weekly (Monday 04:00 UTC) and can be started manually. The TMDB credential is a repository secret (`TMDB_API_KEY`) and never part of the repository.
 
 Standard library only, Python 3.8+.

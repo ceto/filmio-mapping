@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build data/mapping.json (Filmio id -> TMDB/IMDb ids) and a review report.
 
-    TMDB_READ_TOKEN=... python3 generate.py [--limit N] [--refresh]
+    TMDB_API_KEY=... python3 generate.py [--limit N] [--refresh]
 
 Rules:
 - overrides.json always wins ({"tmdb": null} means "never map this title").

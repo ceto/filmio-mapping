@@ -1,8 +1,8 @@
 """TMDB v3 client with an optional on-disk response cache.
 
 Credentials come from the environment, never from the repository:
-- TMDB_READ_TOKEN: API read access token (v4 style, sent as a Bearer header), or
-- TMDB_API_KEY:    v3 API key (sent as the api_key query parameter).
+- TMDB_API_KEY:    v3 API key (sent as the api_key query parameter; preferred), or
+- TMDB_READ_TOKEN: API read access token (v4 style, sent as a Bearer header).
 """
 import hashlib
 import json
@@ -18,7 +18,7 @@ class Tmdb(object):
     def __init__(self, read_token=None, api_key=None, cache_dir=None, get_json=http.get_json,
                  min_interval=0.03, clock=time.monotonic, sleep=time.sleep):
         if not read_token and not api_key:
-            raise ValueError("set TMDB_READ_TOKEN or TMDB_API_KEY")
+            raise ValueError("set TMDB_API_KEY (or TMDB_READ_TOKEN)")
         self.read_token = read_token
         self.api_key = api_key
         self.cache_dir = cache_dir
@@ -49,10 +49,10 @@ class Tmdb(object):
         if wait > 0:
             self.sleep(wait)
         headers, query = {}, list(params)
-        if self.read_token:
-            headers["Authorization"] = "Bearer " + self.read_token
-        else:
+        if self.api_key:
             query.append(("api_key", self.api_key))
+        else:
+            headers["Authorization"] = "Bearer " + self.read_token
         try:
             data = self._get_json(API + path, query, headers=headers)
         except http.HttpError as exc:

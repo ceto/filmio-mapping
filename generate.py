@@ -79,11 +79,17 @@ def write_report(path, titles, report, items):
            "Generated: %s" % datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"), "",
            "| | count |", "|---|---|",
            "| catalogue titles | %d |" % len(titles),
-           "| mapped (total) | %d |" % len(items)]
+           "| mapped (total) | %d |" % len(items),
+           "| of which new with a different year | %d |" % sum(1 for _, r in report["matched"] if r.year_relaxed)]
     for key in ("matched", "kept", "override", "excluded", "ambiguous", "not_found", "disagreements"):
         out.append("| %s | %d |" % (key, len(report[key])))
+    relaxed = [(t, r) for t, r in report["matched"] if r.year_relaxed]
+    out += ["", "## New matches with a different year (please check these)", ""]
+    out += ["- %s -> tmdb %s%s: %s" % (line(t), r.tmdb_id, " / " + r.imdb if r.imdb else "", r.reason)
+            for t, r in relaxed]
     out += ["", "## New matches (please spot-check)", ""]
-    out += ["- %s -> tmdb %s%s" % (line(t), r.tmdb_id, " / " + r.imdb if r.imdb else "") for t, r in report["matched"]]
+    out += ["- %s -> tmdb %s%s" % (line(t), r.tmdb_id, " / " + r.imdb if r.imdb else "")
+            for t, r in report["matched"] if not r.year_relaxed]
     out += ["", "## Ambiguous (candidates for overrides.json)", ""]
     out += ["- %s: %s; %s" % (line(t), r.reason, "; ".join(r.candidates)) for t, r in report["ambiguous"]]
     out += ["", "## Disagreements with the existing mapping", ""]

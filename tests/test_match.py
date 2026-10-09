@@ -42,11 +42,64 @@ class MatchTest(unittest.TestCase):
                         {10: {"runtime": 105, "external_ids": {"imdb_id": "tt123456"}}})
         result = match.match(tmdb, title)
         self.assertEqual((result.status, result.tmdb_id, result.imdb), (match.MATCHED, 10, "tt123456"))
-        self.assertEqual(tmdb.searches[0], ("movie", "How Could I Live Without You?", 2024))
+        self.assertEqual(tmdb.searches[:2], [("movie", "How Could I Live Without You?", 2024),
+                                             ("movie", "How Could I Live Without You?", None)])
 
     def test_year_outside_tolerance_is_rejected(self):
         title = Title("f1", "movie", "Aglaja", None, 2012, None)
         tmdb = FakeTmdb({("movie", "Aglaja"): [movie(1, "Aglaja", 2015)]})
+        self.assertEqual(match.match(tmdb, title).status, match.NOT_FOUND)
+
+    def test_production_vs_release_year_within_tolerance(self):
+        # Filmio gives the production year; TMDB's year filter is exact, so only
+        # the search without a year finds it.
+        title = Title("f", "movie", "Szegénylegények", "The Round-Up", 1965, 5248)
+
+        class YearStrict(FakeTmdb):
+            def search(self, kind, query, year=None):
+                self.searches.append((kind, query, year))
+                return [] if year else self.results.get((kind, query), [])
+        tmdb = YearStrict({("movie", "Szegénylegények"): [movie(94663, "Szegénylegények", 1966)]},
+                          {94663: {"runtime": 87}})
+        result = match.match(tmdb, title)
+        self.assertEqual((result.status, result.tmdb_id, result.year_relaxed), (match.MATCHED, 94663, False))
+        self.assertIn(("movie", "Szegénylegények", None), tmdb.searches)
+
+    def test_late_premiere_accepted_only_with_runtime(self):
+        title = Title("f", "movie", "A tanú", "The Witness", 1969, 6285)
+        results = {("movie", "A tanú"): [movie(40987, "A tanú", 1979), movie(2149, "A tanú teste", 1993)]}
+        result = match.match(FakeTmdb(results, {40987: {"runtime": 105, "external_ids": {"imdb_id": "tt0079985"}}}), title)
+        self.assertEqual((result.status, result.tmdb_id, result.year_relaxed), (match.MATCHED, 40987, True))
+        no_runtime = match.match(FakeTmdb(results, {40987: {}}), title)
+        self.assertEqual(no_runtime.status, match.NOT_FOUND)
+        wrong_runtime = match.match(FakeTmdb(results, {40987: {"runtime": 60}}), title)
+        self.assertEqual(wrong_runtime.status, match.NOT_FOUND)
+
+    def test_late_premiere_ignores_generic_english_title(self):
+        title = Title("f", "movie", "A tanú", "The Witness", 1969, 6285)
+        results = {("movie", "The Witness"): [movie(40987, "A tanú", 1979), movie(1, "The Witness", 2019),
+                                              movie(2, "The Witness", 1992)]}
+        result = match.match(FakeTmdb(results, {40987: {"runtime": 108}}), title)
+        self.assertEqual((result.status, result.tmdb_id), (match.MATCHED, 40987))
+
+    def test_dubbed_version_maps_to_the_original_work(self):
+        self.assertEqual(match.base_title("HUNYADI - szinkronos változat"), "HUNYADI")
+        self.assertEqual(match.base_title("Valami (szinkronos változat)"), "Valami")
+        self.assertEqual(match.base_title("Szinkron"), "Szinkron")
+        title = Title("s", "tvshow", "HUNYADI - szinkronos változat", None, 2024, None)
+        tmdb = FakeTmdb({("tvshow", "HUNYADI"): [{"id": 271050, "name": "Hunyadi", "first_air_date": "2025-03-01"}]})
+        result = match.match(tmdb, title)
+        self.assertEqual((result.status, result.tmdb_id), (match.MATCHED, 271050))
+
+    def test_late_premiere_not_accepted_with_two_same_titled_candidates(self):
+        title = Title("f", "movie", "Lúdas Matyi", None, 1990, 4194)
+        tmdb = FakeTmdb({("movie", "Lúdas Matyi"): [movie(1, "Lúdas Matyi", 1977), movie(2, "Lúdas Matyi", 1950)]},
+                        {1: {"runtime": 70}, 2: {"runtime": 70}})
+        self.assertEqual(match.match(tmdb, title).status, match.NOT_FOUND)
+
+    def test_series_year_is_never_relaxed(self):
+        title = Title("s", "tvshow", "BP Underground", None, 2017, None)
+        tmdb = FakeTmdb({("tvshow", "BP Underground"): [{"id": 1, "name": "BP Underground", "first_air_date": "2023-01-01"}]})
         self.assertEqual(match.match(tmdb, title).status, match.NOT_FOUND)
 
     def test_extra_is_not_matched_to_the_feature_by_runtime(self):

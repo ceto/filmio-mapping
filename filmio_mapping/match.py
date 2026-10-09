@@ -19,16 +19,27 @@ def normalize(text):
     return text
 
 
+# Filmio lists dubbed versions as separate titles ("Hunyadi - szinkronos változat");
+# they are the same work.
+_DUB_SUFFIX = re.compile(r"\s*[-\u2013\u2014(]?\s*szinkronos v[aá]ltozat\)?\s*$", re.IGNORECASE)
+
+
+def base_title(title):
+    """The title without a "szinkronos változat" (dubbed version) suffix."""
+    return _DUB_SUFFIX.sub("", title or "").strip()
+
+
 def title_forms(*titles):
     forms = set()
     for title in titles:
-        norm = normalize(title)
-        if not norm:
-            continue
-        forms.add(norm)
-        for article in ARTICLES:
-            if norm.startswith(article):
-                forms.add(norm[len(article):])
+        for variant in (title, base_title(title)):
+            norm = normalize(variant)
+            if not norm:
+                continue
+            forms.add(norm)
+            for article in ARTICLES:
+                if norm.startswith(article):
+                    forms.add(norm[len(article):])
     return forms
 
 
@@ -57,12 +68,13 @@ class Candidate(object):
 
 
 class Result(object):
-    def __init__(self, status, tmdb_id=None, imdb=None, reason="", candidates=()):
+    def __init__(self, status, tmdb_id=None, imdb=None, reason="", candidates=(), year_relaxed=False):
         self.status = status
         self.tmdb_id = tmdb_id
         self.imdb = imdb
         self.reason = reason
         self.candidates = list(candidates)
+        self.year_relaxed = year_relaxed
 
 
 def runtime_ok(filmio_seconds, tmdb_minutes):
@@ -76,30 +88,49 @@ def runtime_ok(filmio_seconds, tmdb_minutes):
 
 
 def candidates_for(tmdb, title):
-    """Search by original title and by title, with the year when known."""
+    """Search by original title and by title, with and without the year.
+
+    TMDB's year filter is exact on the release year, while Filmio usually
+    gives the production year (often one year earlier), so the year is only
+    applied afterwards, with a tolerance (see match())."""
     seen, found = set(), []
-    queries = [q for q in (title.original_title, title.title) if q]
+    queries = []
+    for q in (title.original_title, base_title(title.original_title), title.title, base_title(title.title)):
+        if q and q not in queries:
+            queries.append(q)
+    years = (title.year, None) if title.year else (None,)
     for query in queries:
-        for result in tmdb.search(title.kind, query, title.year):
-            cand = Candidate.from_result(title.kind, result)
-            if cand.id and cand.id not in seen:
-                seen.add(cand.id)
-                found.append(cand)
+        for year in years:
+            for result in tmdb.search(title.kind, query, year):
+                cand = Candidate.from_result(title.kind, result)
+                if cand.id and cand.id not in seen:
+                    seen.add(cand.id)
+                    found.append(cand)
     return found
 
 
 def match(tmdb, title):
     forms = title_forms(title.title, title.original_title)
     candidates = candidates_for(tmdb, title)
-    plausible = []
-    for cand in candidates:
-        if not (title_forms(*cand.names) & forms):
-            continue
-        if title.year and (cand.year is None or abs(cand.year - title.year) > YEAR_TOLERANCE):
-            continue
-        plausible.append(cand)
+    same_title = [c for c in candidates if title_forms(*c.names) & forms]
+    plausible = [c for c in same_title
+                 if not title.year or (c.year is not None and abs(c.year - title.year) <= YEAR_TOLERANCE)]
     summary = ["%s %s (%s)" % (c.id, c.names[0], c.year) for c in candidates[:5]]
     if not plausible:
+        # Films sometimes premiere years after production (e.g. banned films).
+        # Accept a different year only for a single same-titled candidate
+        # whose runtime confirms it.
+        # Only the Filmio (Hungarian) title counts here: the English
+        # "original title" is often generic ("The Witness") and matches many films.
+        local_forms = title_forms(title.title)
+        same_local = [c for c in same_title if title_forms(*c.names) & local_forms]
+        if title.kind == "movie" and len(same_local) == 1:
+            only = same_local[0]
+            info = tmdb.details(title.kind, only.id)
+            if runtime_ok(title.length, info.get("runtime")) is True:
+                imdb = ((info.get("external_ids") or {}).get("imdb_id")) or None
+                return Result(MATCHED, only.id, imdb, reason="year %s vs %s, runtime agrees"
+                              % (title.year, only.year), candidates=summary, year_relaxed=True)
         return Result(NOT_FOUND, reason="no title/year match", candidates=summary)
 
     details = {c.id: tmdb.details(title.kind, c.id) for c in plausible}

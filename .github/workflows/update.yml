@@ -1,0 +1,52 @@
+name: Update mapping
+
+# Manual only for now. A weekly schedule (e.g. cron: "0 4 * * 1") is to be
+# enabled once the first full run has been reviewed.
+on:
+  workflow_dispatch:
+    inputs:
+      refresh:
+        description: "Re-check existing entries (report only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-mapping
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tests
+        run: python -m unittest discover -s tests -t .
+      - name: Generate
+        env:
+          TMDB_READ_TOKEN: ${{ secrets.TMDB_READ_TOKEN }}
+        run: python generate.py ${{ inputs.refresh && '--refresh' || '' }}
+      - name: Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report
+          path: report.md
+          if-no-files-found: ignore
+      - name: Commit mapping
+        run: |
+          [ -f data/mapping.json ] || { echo "no mapping written"; exit 0; }
+          if git diff --quiet -- data/mapping.json && git ls-files --error-unmatch data/mapping.json >/dev/null 2>&1; then
+            echo "mapping unchanged"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/mapping.json
+          git commit -m "Update mapping"
+          git push

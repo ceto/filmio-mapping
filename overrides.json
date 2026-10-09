@@ -1,0 +1,3 @@
+{
+  "_comment": "Manual corrections, always applied first. {\"type\": \"movie\"|\"tvshow\", \"tmdb\": 123, \"imdb\": \"tt...\"} maps a Filmio id; {\"tmdb\": null} means: never map it."
+}

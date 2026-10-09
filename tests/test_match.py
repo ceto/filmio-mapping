@@ -91,6 +91,24 @@ class MatchTest(unittest.TestCase):
         result = match.match(tmdb, title)
         self.assertEqual((result.status, result.tmdb_id), (match.MATCHED, 271050))
 
+    def test_late_premiere_needs_a_known_year_within_limit(self):
+        title = Title("f", "movie", "Ünnepeink", None, 1981, 3000)
+        far = FakeTmdb({("movie", "Ünnepeink"): [movie(1, "Ünnepeink", 2011)]}, {1: {"runtime": 50}})
+        self.assertEqual(match.match(far, title).status, match.NOT_FOUND)
+        unknown = FakeTmdb({("movie", "Ünnepeink"): [movie(1, "Ünnepeink", None)]}, {1: {"runtime": 50}})
+        self.assertEqual(match.match(unknown, title).status, match.NOT_FOUND)
+
+    def test_native_original_title_breaks_a_tie(self):
+        title = Title("f", "movie", "A vizsga", "The Exam", 2011, None)
+        tmdb = FakeTmdb({("movie", "The Exam"): [movie(980356, "The Exam", 2011), movie(84093, "A vizsga", 2011)]},
+                        {84093: {"external_ids": {"imdb_id": "tt1912996"}}})
+        self.assertEqual(match.match(tmdb, title).tmdb_id, 84093)
+
+    def test_two_native_titles_stay_ambiguous(self):
+        title = Title("f", "movie", "Sarajevo", None, 1940, None)
+        tmdb = FakeTmdb({("movie", "Sarajevo"): [movie(1, "Sarajevo", 1940), movie(2, "Sarajevo", 1940)]})
+        self.assertEqual(match.match(tmdb, title).status, match.AMBIGUOUS)
+
     def test_late_premiere_not_accepted_with_two_same_titled_candidates(self):
         title = Title("f", "movie", "Lúdas Matyi", None, 1990, 4194)
         tmdb = FakeTmdb({("movie", "Lúdas Matyi"): [movie(1, "Lúdas Matyi", 1977), movie(2, "Lúdas Matyi", 1950)]},

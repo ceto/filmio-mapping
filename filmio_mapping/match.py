@@ -8,6 +8,7 @@ import unicodedata
 
 MATCHED, AMBIGUOUS, NOT_FOUND = "matched", "ambiguous", "not_found"
 YEAR_TOLERANCE = 1
+MAX_LATE_PREMIERE = 10  # years; e.g. "A tanú" was made in 1969 and premiered in 1979
 ARTICLES = ("a ", "az ", "the ")
 
 
@@ -109,6 +110,16 @@ def candidates_for(tmdb, title):
     return found
 
 
+def _prefer_original_title(candidates, local_forms):
+    """Among several candidates keep the one whose *original* title equals the
+    Filmio (Hungarian) title, if there is exactly one: Filmio carries
+    Hungarian productions, others only matched via a translated or English title."""
+    if len(candidates) < 2:
+        return candidates
+    native = [c for c in candidates if title_forms(c.names[1]) & local_forms]
+    return native if len(native) == 1 else candidates
+
+
 def match(tmdb, title):
     forms = title_forms(title.title, title.original_title)
     candidates = candidates_for(tmdb, title)
@@ -123,7 +134,10 @@ def match(tmdb, title):
         # Only the Filmio (Hungarian) title counts here: the English
         # "original title" is often generic ("The Witness") and matches many films.
         local_forms = title_forms(title.title)
-        same_local = [c for c in same_title if title_forms(*c.names) & local_forms]
+        same_local = [c for c in same_title if title_forms(*c.names) & local_forms
+                      and c.year is not None and title.year is not None
+                      and abs(c.year - title.year) <= MAX_LATE_PREMIERE]
+        same_local = _prefer_original_title(same_local, local_forms)
         if title.kind == "movie" and len(same_local) == 1:
             only = same_local[0]
             info = tmdb.details(title.kind, only.id)
@@ -144,6 +158,8 @@ def match(tmdb, title):
             confirmed = [c for c, ok in checked if ok is True and c in plausible]
             if len(confirmed) == 1:
                 plausible = confirmed
+    if len(plausible) > 1:
+        plausible = _prefer_original_title(plausible, title_forms(title.title))
     if len(plausible) > 1:
         return Result(AMBIGUOUS, reason="%d candidates" % len(plausible), candidates=summary)
     if title.year is None and len(candidates) > 1:

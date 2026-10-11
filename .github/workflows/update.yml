@@ -33,6 +33,7 @@ jobs:
       - name: Generate
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
         run: python generate.py ${{ inputs.refresh && '--refresh' || '' }}
       - name: Report
         if: always()

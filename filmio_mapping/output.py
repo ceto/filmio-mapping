@@ -9,12 +9,21 @@ import re
 FORMAT_VERSION = 1
 TYPES = ("movie", "tvshow")
 IMDB = re.compile(r"^tt\d{5,10}$")
+RATINGS = ("imdbRating", "imdbVotes", "rottenTomatoes")  # in the order entry() takes them
 
 
-def entry(kind, tmdb_id, imdb=None):
+def entry(kind, tmdb_id, imdb=None, rating=None, votes=None, tomatoes=None):
+    """rating and votes are IMDb's and tomatoes (the Rotten Tomatoes
+    percentage) is looked up by IMDb id, so they are only kept with one."""
     item = {"type": kind, "tmdb": int(tmdb_id)}
     if imdb and IMDB.match(imdb):
         item["imdb"] = imdb
+        if rating is not None:
+            item["imdbRating"] = rating
+        if votes is not None:
+            item["imdbVotes"] = votes
+        if tomatoes is not None:
+            item["rottenTomatoes"] = tomatoes
     return item
 
 
@@ -35,7 +44,19 @@ def validate(document):
             raise ValueError("bad tmdb id for %s" % key)
         if "imdb" in item and not (isinstance(item["imdb"], str) and IMDB.match(item["imdb"])):
             raise ValueError("bad imdb id for %s" % key)
-        if set(item) - {"type", "tmdb", "imdb"}:
+        rating, votes = item.get("imdbRating"), item.get("imdbVotes")
+        if "imdbRating" in item and (isinstance(rating, bool) or not isinstance(rating, (int, float))
+                                     or not 0 <= rating <= 10):
+            raise ValueError("bad imdb rating for %s" % key)
+        if "imdbVotes" in item and (isinstance(votes, bool) or not isinstance(votes, int) or votes < 0):
+            raise ValueError("bad imdb votes for %s" % key)
+        tomatoes = item.get("rottenTomatoes")
+        if "rottenTomatoes" in item and (isinstance(tomatoes, bool) or not isinstance(tomatoes, int)
+                                         or not 0 <= tomatoes <= 100):
+            raise ValueError("bad rotten tomatoes score for %s" % key)
+        if set(item) & {"imdbRating", "imdbVotes", "rottenTomatoes"} and "imdb" not in item:
+            raise ValueError("ratings without imdb id for %s" % key)
+        if set(item) - {"type", "tmdb", "imdb", "imdbRating", "imdbVotes", "rottenTomatoes"}:
             raise ValueError("unknown fields for %s" % key)
 
 

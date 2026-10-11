@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 import generate
-from filmio_mapping import filmio, http, match, output
+from filmio_mapping import filmio, http, match, omdb, output
 from filmio_mapping.filmio import Title
 from tests.test_match import FakeTmdb, movie
 
@@ -22,12 +22,25 @@ class OutputTest(unittest.TestCase):
         for doc in ({"version": 2, "items": {}}, {"version": 1, "items": {"a": {"type": "episode", "tmdb": 1}}},
                     {"version": 1, "items": {"a": {"type": "movie", "tmdb": "1"}}},
                     {"version": 1, "items": {"a": {"type": "movie", "tmdb": 1, "imdb": "nm1"}}},
-                    {"version": 1, "items": {"a": {"type": "movie", "tmdb": 1, "extra": 1}}}):
+                    {"version": 1, "items": {"a": {"type": "movie", "tmdb": 1, "extra": 1}}},
+                    {"version": 1, "items": {"a": {"type": "movie", "tmdb": 1, "imdb": "tt0000001", "imdbRating": "7"}}},
+                    {"version": 1, "items": {"a": {"type": "movie", "tmdb": 1, "imdb": "tt0000001", "imdbVotes": 1.5}}},
+                    {"version": 1, "items": {"a": {"type": "movie", "tmdb": 1, "imdb": "tt0000001", "rottenTomatoes": 101}}},
+                    {"version": 1, "items": {"a": {"type": "movie", "tmdb": 1, "rottenTomatoes": 80}}},
+                    {"version": 1, "items": {"a": {"type": "movie", "tmdb": 1, "imdbRating": 7.0}}}):
             with self.assertRaises(ValueError):
                 output.validate(doc)
 
     def test_entry_drops_bad_imdb(self):
-        self.assertEqual(output.entry("movie", "5", "bogus"), {"type": "movie", "tmdb": 5})
+        self.assertEqual(output.entry("movie", "5", "bogus", 7.1, 10, 80), {"type": "movie", "tmdb": 5})
+
+    def test_entry_with_ratings(self):
+        item = output.entry("movie", 5, "tt0000005", 7.1, 1234, 85)
+        self.assertEqual(item, {"type": "movie", "tmdb": 5, "imdb": "tt0000005", "imdbRating": 7.1, "imdbVotes": 1234,
+                                "rottenTomatoes": 85})
+        output.validate({"version": 1, "items": {"a": item}})
+        self.assertEqual(output.entry("movie", 5, "tt0000005", None, 3),
+                         {"type": "movie", "tmdb": 5, "imdb": "tt0000005", "imdbVotes": 3})
 
 
 class RefreshTest(unittest.TestCase):
@@ -42,6 +55,71 @@ class RefreshTest(unittest.TestCase):
                                  "b": {"type": "movie", "tmdb": 2, "imdb": "tt0000002"},
                                  "d": {"type": "movie", "tmdb": 4}})
         self.assertEqual(report["removed"], [("c", 3)])
+
+    def test_refresh_keeps_ratings_only_with_the_same_imdb_id(self):
+        tmdb = FakeTmdb({}, {1: {"external_ids": {"imdb_id": "tt0000001"}}, 2: {"external_ids": {"imdb_id": "tt0000022"}}})
+        items = {"a": output.entry("movie", 1, "tt0000001", 7.0, 10, 90),
+                 "b": output.entry("movie", 2, "tt0000002", 6.0, 20, 50)}
+        generate.refresh_details(items, {}, tmdb, {}, log=lambda m: None)
+        self.assertEqual(items, {"a": {"type": "movie", "tmdb": 1, "imdb": "tt0000001", "imdbRating": 7.0, "imdbVotes": 10,
+                                       "rottenTomatoes": 90},
+                                 "b": {"type": "movie", "tmdb": 2, "imdb": "tt0000022"}})
+
+
+class FakeOmdb(object):
+    def __init__(self, answers, fail_on=None):
+        self.answers, self.fail_on, self.requests = answers, fail_on, 0
+
+    def ratings(self, imdb_id):
+        if imdb_id == self.fail_on:
+            raise http.HttpError(401, "https://www.omdbapi.com/")
+        self.requests += 1
+        return self.answers.get(imdb_id)
+
+
+class RatingsTest(unittest.TestCase):
+    def items(self):
+        return {"a": output.entry("movie", 1, "tt0000001", 5.0, 5), "b": output.entry("movie", 2),
+                "c": output.entry("movie", 3, "tt0000003", 6.0, 6), "d": output.entry("tvshow", 4, "tt0000004", 4.0, 4),
+                "e": output.entry("movie", 5, "tt0000005", 3.0, 3)}
+
+    def test_updates_clears_and_keeps(self):
+        items = self.items()
+        fake = FakeOmdb({"tt0000001": (7.8, 12345, 91), "tt0000003": (None, None, None), "tt0000005": (None, 4, None)})
+        generate.refresh_ratings(items, fake, log=lambda m: None)
+        self.assertEqual(items["a"], {"type": "movie", "tmdb": 1, "imdb": "tt0000001", "imdbRating": 7.8, "imdbVotes": 12345,
+                                      "rottenTomatoes": 91})
+        self.assertEqual(items["b"], {"type": "movie", "tmdb": 2})
+        self.assertEqual(items["c"], {"type": "movie", "tmdb": 3, "imdb": "tt0000003"})  # IMDb has none
+        self.assertEqual(items["d"]["imdbRating"], 4.0)  # OMDb does not know it: kept
+        self.assertEqual(items["e"], {"type": "movie", "tmdb": 5, "imdb": "tt0000005", "imdbVotes": 4})
+        self.assertEqual(fake.requests, 4)  # nothing asked for the title without an IMDb id
+
+    def test_request_limit_keeps_the_rest(self):
+        items, logged = self.items(), []
+        generate.refresh_ratings(items, FakeOmdb({"tt0000001": (7.8, 12345, None)}, fail_on="tt0000003"), log=logged.append)
+        self.assertEqual(items["a"]["imdbRating"], 7.8)
+        self.assertEqual((items["c"]["imdbRating"], items["d"]["imdbRating"]), (6.0, 4.0))
+        self.assertEqual(len(logged), 1)
+
+    def test_client_parses_omdb_answers(self):
+        answers = {"tt1": {"Response": "True", "imdbRating": "7.8", "imdbVotes": "1,234,567",
+                           "Ratings": [{"Source": "Internet Movie Database", "Value": "7.8/10"},
+                                       {"Source": "Rotten Tomatoes", "Value": "85%"}]},
+                   "tt2": {"Response": "True", "imdbRating": "N/A", "imdbVotes": "N/A"},
+                   "tt3": {"Response": "False", "Error": "Incorrect IMDb ID."}}
+        calls = []
+
+        def get_json(url, params=None):
+            calls.append((url, dict(params)))
+            return answers[dict(params)["i"]]
+        client = omdb.Omdb("KEY", get_json=get_json)
+        self.assertEqual(client.ratings("tt1"), (7.8, 1234567, 85))
+        self.assertEqual(client.ratings("tt2"), (None, None, None))
+        self.assertIsNone(client.ratings("tt3"))
+        self.assertEqual(calls[0], ("https://www.omdbapi.com/", {"i": "tt1", "apikey": "KEY"}))
+        with self.assertRaises(ValueError):
+            omdb.Omdb("")
 
 
 class BuildTest(unittest.TestCase):
@@ -86,6 +164,12 @@ class BuildTest(unittest.TestCase):
         self.tmdb.details_by_id[42] = {"external_ids": {"imdb_id": "tt0000042"}}
         items, _ = generate.build(self.titles, previous, {}, self.tmdb, log=lambda m: None)
         self.assertEqual(items["old"], {"type": "movie", "tmdb": 42, "imdb": "tt0000042"})
+
+    def test_build_adds_ratings(self):
+        self.tmdb.details_by_id[1] = {"external_ids": {"imdb_id": "tt0000001"}}
+        items, _ = generate.build(self.titles, {}, {}, self.tmdb, log=lambda m: None,
+                                  omdb=FakeOmdb({"tt0000001": (8.1, 900, None)}))
+        self.assertEqual(items["new"], {"type": "movie", "tmdb": 1, "imdb": "tt0000001", "imdbRating": 8.1, "imdbVotes": 900})
 
 
 class CatalogueTest(unittest.TestCase):

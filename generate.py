@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build data/mapping.json (Filmio id -> TMDB/IMDb ids) and a review report.
 
-    TMDB_API_KEY=... python3 generate.py [--limit N] [--refresh]
+    TMDB_API_KEY=... OMDB_API_KEY=... python3 generate.py [--limit N] [--refresh]
 
 Rules:
 - overrides.json always wins ({"tmdb": null} means "never map this title").
@@ -14,6 +14,9 @@ Rules:
 - Every run re-reads the IMDb id of every mapped title (TMDB data must not be
   kept longer than 6 months) and drops titles TMDB no longer has (overrides
   excepted).
+- Every run re-reads the IMDb rating and vote count and the Rotten Tomatoes
+  score of every title with an IMDb id from OMDb. Without OMDB_API_KEY, or once OMDb stops answering
+  (daily request limit), the previous values are kept.
 """
 import argparse
 import datetime
@@ -21,7 +24,7 @@ import json
 import os
 import sys
 
-from filmio_mapping import filmio, match, output, tmdb as tmdb_module
+from filmio_mapping import filmio, http, match, omdb as omdb_module, output, tmdb as tmdb_module
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -43,7 +46,7 @@ def load_overrides(path):
     return overrides
 
 
-def build(titles, previous, overrides, tmdb, refresh=False, log=print):
+def build(titles, previous, overrides, tmdb, refresh=False, log=print, omdb=None):
     items, report = {}, {"matched": [], "kept": [], "override": [], "excluded": [],
                          "ambiguous": [], "not_found": [], "disagreements": []}
     for i, title in enumerate(titles, 1):
@@ -73,6 +76,8 @@ def build(titles, previous, overrides, tmdb, refresh=False, log=print):
         if i % 50 == 0:
             log("%d/%d titles, %d TMDB requests" % (i, len(titles), tmdb.requests))
     refresh_details(items, overrides, tmdb, report, log)
+    if omdb:
+        refresh_ratings(items, omdb, log)
     return items, report
 
 
@@ -90,9 +95,28 @@ def refresh_details(items, overrides, tmdb, report, log=print):
             del items[filmio_id]
             continue
         imdb = (info.get("external_ids") or {}).get("imdb_id") or (override or {}).get("imdb") or item.get("imdb")
-        items[filmio_id] = output.entry(item["type"], item["tmdb"], imdb)
+        same = imdb == item.get("imdb")  # the ratings belong to the IMDb id
+        items[filmio_id] = output.entry(item["type"], item["tmdb"], imdb,
+                                        *[item.get(key) if same else None for key in output.RATINGS])
         if n % 100 == 0:
             log("refreshed %d/%d, %d TMDB requests" % (n, len(items), tmdb.requests))
+
+
+def refresh_ratings(items, omdb, log=print):
+    """Re-read the IMDb rating and vote count and the Rotten Tomatoes score
+    of every title with an IMDb id from OMDb."""
+    for n, filmio_id in enumerate(sorted(items), 1):
+        item = items[filmio_id]
+        if "imdb" in item:
+            try:
+                ratings = omdb.ratings(item["imdb"])
+            except http.HttpError as exc:
+                log("OMDb gave up (%s); the remaining ratings are kept as they were" % exc)
+                return
+            if ratings is not None:
+                items[filmio_id] = output.entry(item["type"], item["tmdb"], item["imdb"], *ratings)
+        if n % 100 == 0:
+            log("ratings %d/%d, %d OMDb requests" % (n, len(items), omdb.requests))
 
 
 def write_report(path, titles, report, items):
@@ -103,6 +127,8 @@ def write_report(path, titles, report, items):
            "| | count |", "|---|---|",
            "| catalogue titles | %d |" % len(titles),
            "| mapped (total) | %d |" % len(items),
+           "| with an IMDb rating | %d |" % sum(1 for item in items.values() if "imdbRating" in item),
+           "| with a Rotten Tomatoes score | %d |" % sum(1 for item in items.values() if "rottenTomatoes" in item),
            "| of which new with a different year | %d |" % sum(1 for _, r in report["matched"] if r.year_relaxed)]
     for key in ("matched", "kept", "override", "excluded", "ambiguous", "not_found", "disagreements", "removed"):
         out.append("| %s | %d |" % (key, len(report.get(key, []))))
@@ -137,6 +163,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     tmdb = tmdb_module.Tmdb.from_env(cache_dir=args.cache or None)
+    omdb = omdb_module.Omdb.from_env()
+    if not omdb:
+        print("OMDB_API_KEY not set; ratings are kept as they are")
     previous = output.load(args.out)
     overrides = load_overrides(args.overrides)
     titles = filmio.catalogue(limit=args.limit)
@@ -148,7 +177,7 @@ def main(argv=None):
               % (len(present & set(previous)), len(previous)), file=sys.stderr)
         return 2
 
-    items, report = build(titles, previous, overrides, tmdb, refresh=args.refresh)
+    items, report = build(titles, previous, overrides, tmdb, refresh=args.refresh, omdb=omdb)
     if args.limit:
         # A partial run must not drop the rest of an existing mapping.
         items = dict(previous, **items)
@@ -159,7 +188,8 @@ def main(argv=None):
     else:
         print("mapping unchanged (%d entries)" % len(items))
     write_report(args.report, titles, report, items)
-    print("report: %s; TMDB requests: %d" % (args.report, tmdb.requests))
+    print("report: %s; TMDB requests: %d; OMDb requests: %d"
+          % (args.report, tmdb.requests, omdb.requests if omdb else 0))
     return 0
 
 

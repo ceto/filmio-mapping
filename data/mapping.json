@@ -1,6 +1,6 @@
 {
 "version":1,
-"generated":"2026-10-19T04:14:05Z",
+"generated":"2026-10-26T04:13:57Z",
 "items":{
 "a1e9sawt1msg0ll7bpv72qpe":{
 "type":"movie",
@@ -509,6 +509,13 @@
 "cv483uiizdfpsmjotu5u022j":{
 "type":"movie",
 "tmdb":1443178
+},
+"cws4uijptplrfe0dfh9k4u9o":{
+"type":"movie",
+"tmdb":42516,
+"imdb":"tt0067814",
+"imdbRating":7.9,
+"imdbVotes":2214
 },
 "cz63fy8lpoh024ikzzzvs0w9":{
 "type":"movie",
@@ -4806,6 +4813,13 @@
 "x05p65m31pikn2wetztn2kzu":{
 "type":"movie",
 "tmdb":1373679
+},
+"x05qe3qna6xbylnhwnh9gl5p":{
+"type":"movie",
+"tmdb":343463,
+"imdb":"tt0068900",
+"imdbRating":7.0,
+"imdbVotes":38
 },
 "x0dvapbdxwcv0b9hz40eem18":{
 "type":"movie",
